@@ -111,9 +111,9 @@ def save_private_key(k, filename):
     k_str = str(k)
     k_b64 = base64.b64encode(k_str.encode('utf-8')).decode('utf-8')
 
-    content = f"""---ECC private key---
+    content = f"""---begin monECC private key---
     {k_b64}
-    ---end ECC private key---
+    ---end monECC private key---
     """
 
     with open(filename, 'w') as f:
@@ -126,9 +126,9 @@ def save_public_key(Q, filename):
     q_str = f"{x};{y}"
     q_b64 = base64.b64encode(q_str.encode('utf-8')).decode('utf-8')
 
-    content = f"""---ECC public key---
+    content = f"""---begin monECC public key---
     {q_b64}
-    ---end ECC public key---
+    ---end monECC public key---
     """
 
     with open(filename, 'w') as f:
@@ -143,7 +143,7 @@ def load_private_key(filename):
         if len(lines) < 3:
             raise ValueError("Format de fichier invalide")
 
-        if not lines[0].strip().startswith("---ECC private key---"):
+        if not lines[0].strip().startswith("---begin monECC private key---"):
             raise ValueError("Ce n'est pas une clé privée monECC valide")
 
         k_b64 = lines[1].strip()
@@ -167,7 +167,7 @@ def load_public_key(filename):
         if len(lines) < 3:
             raise ValueError("Format de fichier invalide")
 
-        if not lines[0].strip().startswith("---ECC public key---"):
+        if not lines[0].strip().startswith("---begin monECC public key---"):
             raise ValueError("Ce n'est pas une clé publique monECC valide")
 
         q_b64 = lines[1].strip()
