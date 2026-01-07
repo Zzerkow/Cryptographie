@@ -1,7 +1,5 @@
-#!/usr/bin/env python3
 """
-monECC - Elliptic Curve Cryptography Tool
-Implements ECC encryption/decryption using curve Y^2 = X^3 + 35X + 3 (mod 101)
+TP monECC - Victor Besson & Léo FILSNOEL
 """
 
 import sys
@@ -9,16 +7,182 @@ import hashlib
 import base64
 import random
 
-
-# ECC Parameters
 CURVE_A = 35
 CURVE_B = 3
 CURVE_P = 101
 BASE_POINT = (2, 9)
 
+def mod_inverse(a, p):
+    if a < 0:
+        a = (a % p + p) % p
+
+    def extended_gcd(a, b):
+        if a == 0:
+            return b, 0, 1
+        gcd, x1, y1 = extended_gcd(b % a, a)
+        x = y1 - (b // a) * x1
+        y = x1
+        return gcd, x, y
+
+    gcd, x, _ = extended_gcd(a, p)
+    if gcd != 1:
+        raise ValueError(f"Inverse modulaire n'existe pas pour {a} mod {p}")
+    return (x % p + p) % p
+
+
+def point_add(P, Q):
+    if P is None:
+        return Q
+    if Q is None:
+        return P
+
+    x1, y1 = P
+    x2, y2 = Q
+
+    if x1 == x2 and y1 != y2:
+        return None
+
+    if x1 == x2 and y1 == y2:
+        return point_double(P)
+
+    slope = ((y2 - y1) * mod_inverse(x2 - x1, CURVE_P)) % CURVE_P
+
+    x3 = (slope * slope - x1 - x2) % CURVE_P
+
+    y3 = (slope * (x1 - x3) - y1) % CURVE_P
+
+    return (x3, y3)
+
+
+def point_double(P):
+    if P is None:
+        return None
+
+    x, y = P
+
+    if y == 0:
+        return None
+
+    numerator = (3 * x * x + CURVE_A) % CURVE_P
+    denominator = (2 * y) % CURVE_P
+    slope = (numerator * mod_inverse(denominator, CURVE_P)) % CURVE_P
+
+    x3 = (slope * slope - 2 * x) % CURVE_P
+
+    y3 = (slope * (x - x3) - y) % CURVE_P
+
+    return (x3, y3)
+
+
+def scalar_multiply(k, P):
+    if k == 0:
+        return None  
+
+    if k < 0:
+        raise ValueError("Scalar must be positive")
+
+    result = None  
+    addend = P
+
+    while k:
+        if k & 1: 
+            result = point_add(result, addend)
+        addend = point_double(addend)
+        k >>= 1  
+
+    return result
+
+def generate_keypair(key_range=1000):
+    k = random.randint(1, key_range)
+
+    Q = scalar_multiply(k, BASE_POINT)
+
+    if Q is None:
+        return generate_keypair(key_range)
+
+    return k, Q
+
+
+def save_private_key(k, filename):
+    k_str = str(k)
+    k_b64 = base64.b64encode(k_str.encode('utf-8')).decode('utf-8')
+
+    content = f"""---begin monECC private key---
+    {k_b64}
+    ---end monECC key---
+    """
+
+    with open(filename, 'w') as f:
+        f.write(content)
+
+
+def save_public_key(Q, filename):
+    
+    x, y = Q
+    q_str = f"{x};{y}"
+    q_b64 = base64.b64encode(q_str.encode('utf-8')).decode('utf-8')
+
+    content = f"""---begin monECC public key---
+    {q_b64}
+    ---end monECC key---
+    """
+
+    with open(filename, 'w') as f:
+        f.write(content)
+
+
+def load_private_key(filename):
+    try:
+        with open(filename, 'r') as f:
+            lines = f.readlines()
+
+        if len(lines) < 3:
+            raise ValueError("Format de fichier invalide")
+
+        if not lines[0].strip().startswith("---begin monECC private key---"):
+            raise ValueError("Ce n'est pas une clé privée monECC valide")
+
+        k_b64 = lines[1].strip()
+        k_str = base64.b64decode(k_b64).decode('utf-8')
+        k = int(k_str)
+
+        return k
+    except FileNotFoundError:
+        print(f"Erreur : Fichier '{filename}' introuvable")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Erreur lors de la lecture de la clé privée : {e}")
+        sys.exit(1)
+
+
+def load_public_key(filename):
+    try:
+        with open(filename, 'r') as f:
+            lines = f.readlines()
+
+        if len(lines) < 3:
+            raise ValueError("Format de fichier invalide")
+
+        if not lines[0].strip().startswith("---begin monECC public key---"):
+            raise ValueError("Ce n'est pas une clé publique monECC valide")
+
+        q_b64 = lines[1].strip()
+        q_str = base64.b64decode(q_b64).decode('utf-8')
+
+        x_str, y_str = q_str.split(';')
+        x = int(x_str)
+        y = int(y_str)
+
+        return (x, y)
+    except FileNotFoundError:
+        print(f"Erreur : Fichier '{filename}' introuvable")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Erreur lors de la lecture de la clé publique : {e}")
+        sys.exit(1)
+
 
 def display_help():
-    """Display the help manual"""
     help_text = """
 Script monECC par Victor Besson
 
@@ -56,25 +220,22 @@ def parse_arguments():
 
     command = sys.argv[1]
 
-    # Validate command
     valid_commands = ["keygen", "crypt", "decrypt", "help"]
     if command not in valid_commands:
         print(f"Erreur : Commande invalide '{command}'")
         print(f"Commandes valides : {', '.join(valid_commands)}")
         sys.exit(1)
 
-    # Parse arguments based on command
     args = {
         'command': command,
         'key_file': None,
         'text': None,
-        'filename': 'monECC',  # Default filename (without extension)
-        'size': 1000,  # Default key size range
+        'filename': 'monECC',
+        'size': 1000, 
         'input_file': False,
         'output_file': None
     }
 
-    # For crypt and decrypt, key and text are required
     if command in ["crypt", "decrypt"]:
         if len(sys.argv) < 4:
             print(f"Erreur : La commande '{command}' nécessite <clé> et <texte>")
@@ -84,13 +245,10 @@ def parse_arguments():
         args['key_file'] = sys.argv[2]
         args['text'] = sys.argv[3]
 
-        # Parse switches starting from position 4
         i = 4
     else:
-        # For keygen, parse switches starting from position 2
         i = 2
 
-    # Parse optional switches
     while i < len(sys.argv):
         switch = sys.argv[i]
 
@@ -132,27 +290,50 @@ def parse_arguments():
     return args
 
 
+def cmd_keygen(args):
+    print("Génération de la paire de clés ECC...")
+    print(f"Courbe : Y² = X³ + {CURVE_A}X + {CURVE_B} (mod {CURVE_P})")
+    print(f"Point de base P : {BASE_POINT}")
+    print(f"Plage de clé privée : 1 à {args['size']}")
+
+    k, Q = generate_keypair(args['size'])
+
+    print(f"\nClé privée k : {k}")
+    print(f"Clé publique Q : {Q}")
+
+    priv_filename = f"{args['filename']}.priv"
+    pub_filename = f"{args['filename']}.pub"
+
+    save_private_key(k, priv_filename)
+    save_public_key(Q, pub_filename)
+
+    print(f"\n✓ Clé privée sauvegardée dans : {priv_filename}")
+    print(f"✓ Clé publique sauvegardée dans : {pub_filename}")
+
+
+def cmd_crypt(args):
+    """Execute crypt command - Encrypt message"""
+    print("Chiffrement du message...")
+    print(f"Fichier de clé : {args['key_file']}")
+    print(f"Texte : {args['text']}")
+
+def cmd_decrypt(args):
+    """Execute decrypt command - Decrypt message"""
+    print("Déchiffrement du message...")
+    print(f"Fichier de clé : {args['key_file']}")
+    print(f"Texte chiffré : {args['text']}")
+
 def main():
-    """Main entry point"""
     args = parse_arguments()
 
     if args['command'] == 'keygen':
-        print("Commande keygen appelée")
-        print(f"Nom des fichiers : {args['filename']}.pub et {args['filename']}.priv")
-        print(f"Plage de clé : 1 à {args['size']}")
-        # TODO: Implement keygen
+        cmd_keygen(args)
 
     elif args['command'] == 'crypt':
-        print("Commande crypt appelée")
-        print(f"Fichier de clé : {args['key_file']}")
-        print(f"Texte : {args['text']}")
-        # TODO: Implement crypt
+        cmd_crypt(args)
 
     elif args['command'] == 'decrypt':
-        print("Commande decrypt appelée")
-        print(f"Fichier de clé : {args['key_file']}")
-        print(f"Texte chiffré : {args['text']}")
-        # TODO: Implement decrypt
+        cmd_decrypt(args)
 
 
 if __name__ == "__main__":

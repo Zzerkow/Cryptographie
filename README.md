@@ -63,10 +63,27 @@ python3 monECC.py decrypt monECC.priv "message_chiffré"
 - `-i` : Utilise un fichier texte en entrée au lieu d'une chaîne
 - `-o <fichier>` : Spécifie un fichier de sortie au lieu d'afficher à l'écran
 
+### Détails techniques
+
+**Opérations ECC implémentées :**
+- Addition de points sur la courbe elliptique
+- Doublement de points
+- Multiplication scalaire (algorithme Double-and-Add)
+- Inverse modulaire (algorithme d'Euclide étendu)
+
+**Format des clés :**
+- Les clés sont encodées en Base64
+- Format compatible entre différentes instances du programme
+- Clés privées : contiennent le scalaire k
+- Clés publiques : contiennent les coordonnées (x, y) du point Q
+
+**Note sur la sécurité :**
+Cette implémentation utilise des paramètres trop faibles pour une utilisation réelle (point de base d'ordre 4). Elle est destinée uniquement à des fins pédagogiques.
+
 ### Statut du projet
 
-✅ Section 3.1 - Gestion des paramètres en ligne de commande
-⏳ Section 3.2 - Génération de clés (keygen)
-⏳ Section 3.3 - Chiffrement (crypt)
-⏳ Section 3.4 - Déchiffrement (decrypt)
-⏳ Section 4 - Options avancées
+Section 3.1 - Gestion des paramètres en ligne de commande -> Done
+Section 3.2 - Génération de clés (keygen) -> Done
+Section 3.3 - Chiffrement (crypt)
+Section 3.4 - Déchiffrement (decrypt)
+Section 4 - Options avancées (switches -f, -s, -i, -o)
