@@ -1,2 +1,4 @@
 *.priv
 *.pub
+__pycache__/
+venv/

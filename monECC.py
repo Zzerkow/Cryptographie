@@ -6,6 +6,10 @@ import sys
 import hashlib
 import base64
 import random
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import padding
+
 
 CURVE_A = 35
 CURVE_B = 3
@@ -107,9 +111,9 @@ def save_private_key(k, filename):
     k_str = str(k)
     k_b64 = base64.b64encode(k_str.encode('utf-8')).decode('utf-8')
 
-    content = f"""---begin monECC private key---
+    content = f"""---ECC private key---
     {k_b64}
-    ---end monECC key---
+    ---end ECC private key---
     """
 
     with open(filename, 'w') as f:
@@ -122,9 +126,9 @@ def save_public_key(Q, filename):
     q_str = f"{x};{y}"
     q_b64 = base64.b64encode(q_str.encode('utf-8')).decode('utf-8')
 
-    content = f"""---begin monECC public key---
+    content = f"""---ECC public key---
     {q_b64}
-    ---end monECC key---
+    ---end ECC public key---
     """
 
     with open(filename, 'w') as f:
@@ -139,7 +143,7 @@ def load_private_key(filename):
         if len(lines) < 3:
             raise ValueError("Format de fichier invalide")
 
-        if not lines[0].strip().startswith("---begin monECC private key---"):
+        if not lines[0].strip().startswith("---ECC private key---"):
             raise ValueError("Ce n'est pas une clé privée monECC valide")
 
         k_b64 = lines[1].strip()
@@ -163,7 +167,7 @@ def load_public_key(filename):
         if len(lines) < 3:
             raise ValueError("Format de fichier invalide")
 
-        if not lines[0].strip().startswith("---begin monECC public key---"):
+        if not lines[0].strip().startswith("---ECC public key---"):
             raise ValueError("Ce n'est pas une clé publique monECC valide")
 
         q_b64 = lines[1].strip()
@@ -184,36 +188,19 @@ def load_public_key(filename):
 
 def display_help():
     help_text = """
-Script monECC par Victor Besson
+    Syntaxe :
+        monECC <commande> [<clé>] [<texte>]
 
-Syntaxe :
-    monECC <commande> [<clé>] [<texte>] [switchs]
-
-Commande :
-    keygen  : Génère une paire de clé
-    crypt   : Chiffre <texte> pour la clé publique <clé>
-    decrypt : Déchiffre <texte> pour la clé privée <clé>
-    help    : Affiche ce manuel
-
-Clé :
-    Un fichier qui contient une clé publique monECC ("crypt") ou une clé
-    privée ("decrypt")
-
-Texte :
-    Une phrase en clair ("crypt") ou une phrase chiffrée ("decrypt")
-
-Switchs :
-    -f <file>   : permet de choisir le nom des clés générées,
-                  monECC.pub et monECC.priv par défaut
-    -s <size>   : précise la plage d'aléa (1 à <size>), défaut 1000
-    -i          : utilise un fichier texte au lieu d'une chaîne
-    -o <file>   : nom du fichier de sortie (au lieu d'afficher)
-"""
+    Commande :
+        keygen  : Génère une paire de clé
+        crypt   : Chiffre <texte> pour la clé publique <clé>
+        decrypt : Déchiffre <texte> pour la clé privée <clé>
+        help    : Affiche ce manuel
+    """
     print(help_text)
 
 
 def parse_arguments():
-    """Parse and validate command-line arguments"""
     if len(sys.argv) < 2 or sys.argv[1] == "help":
         display_help()
         sys.exit(0)
@@ -312,20 +299,12 @@ def cmd_keygen(args):
 
 
 def compute_shared_secret_hash(S):
-    """
-    Compute SHA256 hash of shared secret point S
-    Following the specification: hash both coordinates
-    Returns: hex digest of the hash
-    """
     x, y = S
 
-    # Convert coordinates to bytes and hash them
-    # Hash x coordinate
     hash_x = hashlib.sha256(str(x).encode('utf-8'))
-    # Hash y coordinate
+    
     hash_y = hashlib.sha256(str(y).encode('utf-8'))
 
-    # Combine both hashes
     combined = hash_x.digest() + hash_y.digest()
     final_hash = hashlib.sha256(combined)
 
@@ -333,73 +312,39 @@ def compute_shared_secret_hash(S):
 
 
 def encrypt_message(message, Qb):
-    """
-    Encrypt a message using ECC + AES/CBC
-
-    Algorithm:
-    1. Generate ephemeral keypair (k_eph, R) where R = k_eph * P
-    2. Compute shared secret S = k_eph * Qb
-    3. Hash S with SHA256 to get encryption key
-    4. Encrypt message with AES/CBC
-    5. Return R and ciphertext
-
-    Args:
-        message: plaintext message (string)
-        Qb: recipient's public key (point)
-
-    Returns:
-        (R, ciphertext_b64): ephemeral public point and encrypted message
-    """
-    # Import crypto library here (lazy loading)
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-    from cryptography.hazmat.backends import default_backend
-    from cryptography.hazmat.primitives import padding
-
-    # 1. Generate ephemeral keypair
+    
     k_eph = random.randint(1, 1000)
     R = scalar_multiply(k_eph, BASE_POINT)
 
     if R is None:
-        # Retry if we get point at infinity
         return encrypt_message(message, Qb)
 
-    # 2. Compute shared secret S = k_eph * Qb
     S = scalar_multiply(k_eph, Qb)
 
     if S is None:
-        # Retry if we get point at infinity
         return encrypt_message(message, Qb)
 
-    # 3. Hash the shared secret
     secret_hash = compute_shared_secret_hash(S)
 
-    # 4. Prepare AES key and IV
-    # Use first 16 chars as IV, last 16 chars as key
     iv = secret_hash[:16].encode('utf-8')
     key = secret_hash[-16:].encode('utf-8')
 
-    # 5. Pad the message (PKCS7 padding)
     padder = padding.PKCS7(128).padder()
     padded_data = padder.update(message.encode('utf-8'))
     padded_data += padder.finalize()
 
-    # 6. Encrypt with AES/CBC
     cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
     encryptor = cipher.encryptor()
     ciphertext = encryptor.update(padded_data) + encryptor.finalize()
 
-    # 7. Encode ciphertext in base64
     ciphertext_b64 = base64.b64encode(ciphertext).decode('utf-8')
 
     return R, ciphertext_b64
 
 
 def cmd_crypt(args):
-    """Execute crypt command - Encrypt message"""
-    # Load recipient's public key
     Qb = load_public_key(args['key_file'])
 
-    # Get message (from string or file)
     if args['input_file']:
         try:
             with open(args['text'], 'r') as f:
@@ -410,13 +355,10 @@ def cmd_crypt(args):
     else:
         message = args['text']
 
-    # Encrypt the message
     R, ciphertext_b64 = encrypt_message(message, Qb)
 
-    # Format output: R_x;R_y;ciphertext
     output = f"{R[0]};{R[1]};{ciphertext_b64}"
 
-    # Output result
     if args['output_file']:
         with open(args['output_file'], 'w') as f:
             f.write(output)
@@ -424,11 +366,73 @@ def cmd_crypt(args):
     else:
         print(output)
 
+def decrypt_message(encrypted_data, k):
+    try:
+        parts = encrypted_data.split(';')
+        if len(parts) != 3:
+            raise ValueError("Format invalide. Format attendu: R_x;R_y;ciphertext_base64")
+
+        R_x = int(parts[0])
+        R_y = int(parts[1])
+        ciphertext_b64 = parts[2]
+
+        R = (R_x, R_y)
+    except Exception as e:
+        print(f"Erreur lors du parsing du message chiffré : {e}")
+        sys.exit(1)
+
+    S = scalar_multiply(k, R)
+
+    if S is None:
+        print("Erreur : Impossible de calculer le secret partagé")
+        sys.exit(1)
+
+    secret_hash = compute_shared_secret_hash(S)
+
+    iv = secret_hash[:16].encode('utf-8')
+    key = secret_hash[-16:].encode('utf-8')
+
+    try:
+        ciphertext = base64.b64decode(ciphertext_b64)
+    except Exception as e:
+        print(f"Erreur lors du décodage base64 : {e}")
+        sys.exit(1)
+
+    try:
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+        decryptor = cipher.decryptor()
+        padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+
+        unpadder = padding.PKCS7(128).unpadder()
+        plaintext = unpadder.update(padded_plaintext)
+        plaintext += unpadder.finalize()
+
+        return plaintext.decode('utf-8')
+    except Exception as e:
+        print(f"Erreur lors du déchiffrement : {e}")
+        sys.exit(1)
+
 def cmd_decrypt(args):
-    """Execute decrypt command - Decrypt message"""
-    print("Déchiffrement du message...")
-    print(f"Fichier de clé : {args['key_file']}")
-    print(f"Texte chiffré : {args['text']}")
+    k = load_private_key(args['key_file'])
+
+    if args['input_file']:
+        try:
+            with open(args['text'], 'r') as f:
+                encrypted_data = f.read().strip()
+        except FileNotFoundError:
+            print(f"Erreur : Fichier '{args['text']}' introuvable")
+            sys.exit(1)
+    else:
+        encrypted_data = args['text']
+
+    plaintext = decrypt_message(encrypted_data, k)
+
+    if args['output_file']:
+        with open(args['output_file'], 'w') as f:
+            f.write(plaintext)
+        print(f"Message déchiffré sauvegardé dans : {args['output_file']}")
+    else:
+        print(plaintext)
 
 def main():
     args = parse_arguments()
