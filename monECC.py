@@ -311,11 +311,118 @@ def cmd_keygen(args):
     print(f"✓ Clé publique sauvegardée dans : {pub_filename}")
 
 
+def compute_shared_secret_hash(S):
+    """
+    Compute SHA256 hash of shared secret point S
+    Following the specification: hash both coordinates
+    Returns: hex digest of the hash
+    """
+    x, y = S
+
+    # Convert coordinates to bytes and hash them
+    # Hash x coordinate
+    hash_x = hashlib.sha256(str(x).encode('utf-8'))
+    # Hash y coordinate
+    hash_y = hashlib.sha256(str(y).encode('utf-8'))
+
+    # Combine both hashes
+    combined = hash_x.digest() + hash_y.digest()
+    final_hash = hashlib.sha256(combined)
+
+    return final_hash.hexdigest()
+
+
+def encrypt_message(message, Qb):
+    """
+    Encrypt a message using ECC + AES/CBC
+
+    Algorithm:
+    1. Generate ephemeral keypair (k_eph, R) where R = k_eph * P
+    2. Compute shared secret S = k_eph * Qb
+    3. Hash S with SHA256 to get encryption key
+    4. Encrypt message with AES/CBC
+    5. Return R and ciphertext
+
+    Args:
+        message: plaintext message (string)
+        Qb: recipient's public key (point)
+
+    Returns:
+        (R, ciphertext_b64): ephemeral public point and encrypted message
+    """
+    # Import crypto library here (lazy loading)
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import padding
+
+    # 1. Generate ephemeral keypair
+    k_eph = random.randint(1, 1000)
+    R = scalar_multiply(k_eph, BASE_POINT)
+
+    if R is None:
+        # Retry if we get point at infinity
+        return encrypt_message(message, Qb)
+
+    # 2. Compute shared secret S = k_eph * Qb
+    S = scalar_multiply(k_eph, Qb)
+
+    if S is None:
+        # Retry if we get point at infinity
+        return encrypt_message(message, Qb)
+
+    # 3. Hash the shared secret
+    secret_hash = compute_shared_secret_hash(S)
+
+    # 4. Prepare AES key and IV
+    # Use first 16 chars as IV, last 16 chars as key
+    iv = secret_hash[:16].encode('utf-8')
+    key = secret_hash[-16:].encode('utf-8')
+
+    # 5. Pad the message (PKCS7 padding)
+    padder = padding.PKCS7(128).padder()
+    padded_data = padder.update(message.encode('utf-8'))
+    padded_data += padder.finalize()
+
+    # 6. Encrypt with AES/CBC
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+    encryptor = cipher.encryptor()
+    ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+
+    # 7. Encode ciphertext in base64
+    ciphertext_b64 = base64.b64encode(ciphertext).decode('utf-8')
+
+    return R, ciphertext_b64
+
+
 def cmd_crypt(args):
     """Execute crypt command - Encrypt message"""
-    print("Chiffrement du message...")
-    print(f"Fichier de clé : {args['key_file']}")
-    print(f"Texte : {args['text']}")
+    # Load recipient's public key
+    Qb = load_public_key(args['key_file'])
+
+    # Get message (from string or file)
+    if args['input_file']:
+        try:
+            with open(args['text'], 'r') as f:
+                message = f.read()
+        except FileNotFoundError:
+            print(f"Erreur : Fichier '{args['text']}' introuvable")
+            sys.exit(1)
+    else:
+        message = args['text']
+
+    # Encrypt the message
+    R, ciphertext_b64 = encrypt_message(message, Qb)
+
+    # Format output: R_x;R_y;ciphertext
+    output = f"{R[0]};{R[1]};{ciphertext_b64}"
+
+    # Output result
+    if args['output_file']:
+        with open(args['output_file'], 'w') as f:
+            f.write(output)
+        print(f"Message chiffré sauvegardé dans : {args['output_file']}")
+    else:
+        print(output)
 
 def cmd_decrypt(args):
     """Execute decrypt command - Decrypt message"""

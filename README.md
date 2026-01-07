@@ -77,6 +77,21 @@ python3 monECC.py decrypt monECC.priv "message_chiffré"
 - Clés privées : contiennent le scalaire k
 - Clés publiques : contiennent les coordonnées (x, y) du point Q
 
+**Algorithme de chiffrement (ECIES) :**
+1. Génération d'une clé éphémère aléatoire k_eph
+2. Calcul du point éphémère public R = k_eph * P
+3. Calcul du secret partagé S = k_eph * Qb (Qb = clé publique du destinataire)
+4. Hachage de S avec SHA256 pour obtenir la clé de chiffrement
+5. Chiffrement du message avec AES-128 en mode CBC
+6. Format de sortie : `R_x;R_y;ciphertext_base64`
+
+**Déchiffrement :**
+Pour déchiffrer, le destinataire :
+1. Extrait R du message chiffré
+2. Calcule S = k * R (k = sa clé privée)
+3. Obtient la même clé de chiffrement par hachage de S
+4. Déchiffre avec AES-128 CBC
+
 **Note sur la sécurité :**
 Cette implémentation utilise des paramètres trop faibles pour une utilisation réelle (point de base d'ordre 4). Elle est destinée uniquement à des fins pédagogiques.
 
@@ -84,6 +99,6 @@ Cette implémentation utilise des paramètres trop faibles pour une utilisation 
 
 Section 3.1 - Gestion des paramètres en ligne de commande -> Done
 Section 3.2 - Génération de clés (keygen) -> Done
-Section 3.3 - Chiffrement (crypt)
+Section 3.3 - Chiffrement (crypt) -> Done
 Section 3.4 - Déchiffrement (decrypt)
 Section 4 - Options avancées (switches -f, -s, -i, -o)
